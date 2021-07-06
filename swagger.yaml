@@ -1,0 +1,227 @@
+swagger: "2.0"
+info:
+  description: "Smart home auth server api. Test key: special-key."
+  version: "1.0"
+  title: "Smart home auth server" 
+host: "localhost:8080"
+basePath: "/"
+tags:
+- name: "users"
+  description: "Users"
+- name: "controllers"
+  description: "Functions with user controllers"
+
+schemes:
+- "https"
+- "http"
+paths:
+  /users/register: 
+    post: 
+      tags: 
+      - "users"
+      summary: "Create new user"
+      description: ""
+      operationId: "createUser"
+      consumes:
+      - "application/json"
+      parameters: 
+      - in: "body"
+        name: "request"
+        description: "Create new user request"
+        schema: 
+          $ref: '#/definitions/CreateUserRequest'
+      responses:
+        500:
+          description: "Internal Server Error"          
+        409: 
+          description: "User already existed"
+        201:
+          description: "User created"
+      security:
+      - sh_auth:
+        - "write:users"
+  /users/auth: 
+    post: 
+      tags: 
+      - "users"
+      summary: "Login as user to edit controllers"
+      description: ""
+      operationId: "loginUser"
+      produces:
+      - "application/text"
+      parameters: 
+      - in: "query"
+        name: "login"
+        description: "User login"
+        type: string
+      - in: "query"
+        name: "password"
+        description: "User password"
+        type: string
+      responses:
+        500:
+          description: "Internal Server Error"          
+        200:
+          description: "User logged on. Response is a token"
+          schema: 
+            type: "string"
+      security:
+      - sh_auth:
+        - "write:users"
+  /controllers: 
+    get: 
+      tags:
+      - "controllers"
+      summary: "Get user controllers"
+      description: ""
+      operationId: "getControllers"
+      produces:
+      - "application/json"
+      responses:
+        401: 
+          description: "Unauthorized"
+        500:
+          description: "Internal Server Error"
+        200: 
+          description: "Return messages"
+          schema: 
+            type: "array"
+            items: 
+              $ref: "#/definitions/Controller"
+      security:
+      - sh_auth:
+        - "read:controllers"
+    post: 
+      tags:
+      - "controllers"
+      summary: "Create new controller"
+      description: ""
+      operationId: "createController"
+      consumes:
+      - "application/json"
+      parameters: 
+      - in: "body"
+        name: "controller"
+        description: ""
+        schema: 
+          $ref: '#/definitions/Controller'
+      responses:
+        400: 
+          description: "invalid body"
+        401: 
+          description: "Unauthorized"
+        500:
+          description: "Internal Server Error"
+        201: 
+          description: "Created"
+      security:
+      - sh_auth:
+        - "write:controllers"
+  /controllers/{id}: 
+    parameters: 
+     - in: "path"
+       name: "id"
+       description: "Controller id"
+       type: "integer"
+       required: true
+    get: 
+      tags:
+      - "controllers"
+      summary: "Get user controller"
+      description: ""
+      operationId: "getController"
+      produces:
+      - "application/json"
+      responses:
+        401: 
+          description: "Unauthorized"
+        500:
+          description: "Internal Server Error"
+        200: 
+          description: "Return controller"
+          schema: 
+            $ref: "#/definitions/Controller"
+      security:
+      - sh_auth:
+        - "read:controllers"
+    put: 
+      tags:
+      - "controllers"
+      summary: "update controller"
+      description: ""
+      operationId: "updateController"
+      consumes:
+      - "application/json"
+      parameters: 
+      - in: "body"
+        name: "controller"
+        description: ""
+        schema: 
+          $ref: '#/definitions/Controller'
+      responses:
+        400: 
+          description: "invalid body"
+        401: 
+          description: "Unauthorized"
+        500:
+          description: "Internal Server Error"
+        200: 
+          description: "Updated"
+      security:
+      - sh_auth:
+        - "write:controllers"
+    delete: 
+      tags:
+      - "controllers"
+      summary: "delete controller"
+      description: ""
+      operationId: "deleteController"
+      responses:
+        400: 
+          description: "invalid body"
+        401: 
+          description: "Unauthorized"
+        500:
+          description: "Internal Server Error"
+        200: 
+          description: "Deleted"
+      security:
+      - sh_auth:
+        - "write:controllers"
+securityDefinitions:
+  sh_auth:
+    type: "oauth2"
+    authorizationUrl: "http://.ru/oauth/dialog"
+    flow: "implicit"
+    scopes:
+      write:users: "create users"
+      read:users: "auth users"
+      read:controllers: "read controllers"
+      write:controllers: "write controllers"
+  api_key:
+    type: "apiKey"
+    name: "api_key"
+    in: "header"
+definitions:
+  CreateUserRequest: 
+    type: "object"
+    properties: 
+      auth_login:
+        type: "string"
+      auth_pass: 
+        type: "string"
+      user_login:
+        type: "string"
+      user_pass: 
+        type: "string"
+  Controller:
+    type: "object"
+    properties:       
+      id:
+        type: "integer"
+      name: 
+        type: "string"
+      password: 
+        type: "string"
+      uri: 
+        type: "string"

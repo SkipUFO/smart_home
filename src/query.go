@@ -41,6 +41,7 @@ func deviceQuery(c context.Context, requestID string, token string, body []byte)
 	if err != nil {
 		return "", err
 	}
+	defer rows.Close()
 	count := 0
 	for rows.Next() {
 		var name, password, uri pgtype.Varchar
@@ -52,7 +53,7 @@ func deviceQuery(c context.Context, requestID string, token string, body []byte)
 		temp, err := getUserDevicesFromSmartHome(ctx, name.String, password.String, uri.String)
 		if err != nil {
 			msu.Error(ctx, err)
-			return "", err
+			// return "", err
 		}
 
 		devices = append(devices, temp...)
@@ -83,7 +84,7 @@ func deviceQuery(c context.Context, requestID string, token string, body []byte)
 
 	for _, requestedDevice := range requestedDevices.Devices {
 		for _, device := range devices {
-			if device.ID == requestedDevice.ID {
+			if device.Guid == requestedDevice.ID {
 				typeYandexID, err := typeYandex(device.DeviceTypeID)
 				if err != nil {
 					continue
@@ -99,7 +100,7 @@ func deviceQuery(c context.Context, requestID string, token string, body []byte)
 					Capabilities []interface{} `json:"capabilities"`
 				}{
 					ID:           requestedDevice.ID,
-					Capabilities: toYandexQueryCapabilities(device),
+					Capabilities: toYandexQueryCapabilities(typeYandexID, device),
 				})
 				break
 			}
@@ -115,138 +116,161 @@ func deviceQuery(c context.Context, requestID string, token string, body []byte)
 	return string(result), nil
 }
 
-func toYandexQueryCapabilities(device deviceSmartHome) []interface{} {
-	switch device.DeviceTypeID {
-	case 1:
+func toYandexQueryCapabilities(yandexType string, device deviceSmartHome) []interface{} {
+	switch yandexType {
+	case "devices.types.light":
 		{
-			TurnOn := false
-			if device.TurnOn == 1 {
-				TurnOn = true
-			}
-			return []interface{}{struct {
-				Type  string `json:"type"`
-				State struct {
-					Instance string      `json:"instance"`
-					Value    interface{} `json:"value"`
-				} `json:"state"`
-			}{
-				Type: "devices.capabilities.on_off",
-				State: struct {
-					Instance string      "json:\"instance\""
-					Value    interface{} "json:\"value\""
+			if device.Dimming == 0 {
+				TurnOn := false
+				if device.TurnOn == 1 {
+					TurnOn = true
+				}
+				return []interface{}{struct {
+					Type  string `json:"type"`
+					State struct {
+						Instance string      `json:"instance"`
+						Value    interface{} `json:"value"`
+					} `json:"state"`
 				}{
-					Instance: "on",
-					Value:    TurnOn,
-				},
-			}}
-		}
-	case 4, 14:
-		{
-			TurnOn := false
-			if device.TurnOn == 1 {
-				TurnOn = true
-			}
-			return []interface{}{struct {
-				Type  string `json:"type"`
-				State struct {
-					Instance string      `json:"instance"`
-					Value    interface{} `json:"value"`
-				} `json:"state"`
-			}{
-				Type: "devices.capabilities.on_off",
-				State: struct {
-					Instance string      "json:\"instance\""
-					Value    interface{} "json:\"value\""
-				}{
-					Instance: "on",
-					Value:    TurnOn,
-				},
-			}, struct {
-				Type  string `json:"type"`
-				State struct {
-					Instance string      `json:"instance"`
-					Value    interface{} `json:"value"`
-				} `json:"state"`
-			}{
-				Type: "devices.capabilities.range",
-				State: struct {
-					Instance string      "json:\"instance\""
-					Value    interface{} "json:\"value\""
-				}{
-					Instance: "range",
-					Value:    float32(device.DimmingValue / 100),
-				},
-			}}
-		}
-	case 19:
-		return []interface{}{struct {
-			Type       string `json:"type"`
-			Retrivable bool   `json:"retrivable"`
-			Reportable bool   `json:"reportable"`
-			Parameters struct {
-				Split bool `json:"split"`
-			} `json:"parameters"`
-		}{
-			Type:       "devices.capabilities.on_off",
-			Retrivable: true,
-			Reportable: true,
-		}}
-	case 25:
-		return []interface{}{
-			struct {
-				Type       string `json:"type"`
-				Retrivable bool   `json:"retrivable"`
-				Reportable bool   `json:"reportable"`
-				Parameters struct {
-					Split bool `json:"split"`
-				} `json:"parameters"`
-			}{
-				Type:       "devices.capabilities.on_off",
-				Retrivable: true,
-				Reportable: true,
-			},
-			struct {
-				Type       string `json:"type"`
-				Retrivable bool   `json:"retrivable"`
-				Reportable bool   `json:"reportable"`
-				Parameters struct {
-					Instance     string `json:"instance"`
-					Unit         string `json:"unit"`
-					RandomAccess bool   `json:"random_access"`
-					Range        struct {
-						Min       float32 `json:"min"`
-						Max       float32 `json:"max"`
-						Precision float32 `json:"precision"`
-					} `json:"range"`
-				} `json:"parameters"`
-			}{
-				Type:       "devices.capabilities.range",
-				Retrivable: true,
-				Reportable: true,
-				Parameters: struct {
-					Instance     string `json:"instance"`
-					Unit         string `json:"unit"`
-					RandomAccess bool   `json:"random_access"`
-					Range        struct {
-						Min       float32 `json:"min"`
-						Max       float32 `json:"max"`
-						Precision float32 `json:"precision"`
-					} `json:"range"`
-				}{
-					Instance:     "temperature",
-					Unit:         "unit.temperature.celsius",
-					RandomAccess: true,
-					Range: struct {
-						Min       float32 "json:\"min\""
-						Max       float32 "json:\"max\""
-						Precision float32 "json:\"precision\""
+					Type: "devices.capabilities.on_off",
+					State: struct {
+						Instance string      "json:\"instance\""
+						Value    interface{} "json:\"value\""
 					}{
-						Min:       0,
-						Max:       75,
-						Precision: 1,
+						Instance: "on",
+						Value:    TurnOn,
 					},
+				}}
+			} else {
+				TurnOn := false
+				if device.TurnOn == 1 {
+					TurnOn = true
+				}
+				return []interface{}{struct {
+					Type  string `json:"type"`
+					State struct {
+						Instance string      `json:"instance"`
+						Value    interface{} `json:"value"`
+					} `json:"state"`
+				}{
+					Type: "devices.capabilities.on_off",
+					State: struct {
+						Instance string      "json:\"instance\""
+						Value    interface{} "json:\"value\""
+					}{
+						Instance: "on",
+						Value:    TurnOn,
+					},
+				}, struct {
+					Type  string `json:"type"`
+					State struct {
+						Instance string      `json:"instance"`
+						Value    interface{} `json:"value"`
+					} `json:"state"`
+				}{
+					Type: "devices.capabilities.range",
+					State: struct {
+						Instance string      "json:\"instance\""
+						Value    interface{} "json:\"value\""
+					}{
+						Instance: "range",
+						Value:    float32(device.DimmingValue / 100),
+					},
+				}}
+			}
+		}
+	case "devices.types.socket":
+		{
+			TurnOn := false
+			if device.TurnOn == 1 {
+				TurnOn = true
+			}
+			return []interface{}{struct {
+				Type  string `json:"type"`
+				State struct {
+					Instance string      `json:"instance"`
+					Value    interface{} `json:"value"`
+				} `json:"state"`
+			}{
+				Type: "devices.capabilities.on_off",
+				State: struct {
+					Instance string      "json:\"instance\""
+					Value    interface{} "json:\"value\""
+				}{
+					Instance: "on",
+					Value:    TurnOn,
 				},
 			}}
+		}
+	case "devices.types.openable.curtain":
+		{
+			TurnOn := false
+			if device.TurnOn == 1 && device.LineIndex%2 == 0 {
+				TurnOn = true
+			}
+			return []interface{}{struct {
+				Type  string `json:"type"`
+				State struct {
+					Instance string      `json:"instance"`
+					Value    interface{} `json:"value"`
+				} `json:"state"`
+			}{
+				Type: "devices.capabilities.on_off",
+				State: struct {
+					Instance string      "json:\"instance\""
+					Value    interface{} "json:\"value\""
+				}{
+					Instance: "on",
+					Value:    TurnOn,
+				},
+			}}
+		}
+	case "devices.types.openable":
+		{
+			TurnOn := false
+			if device.TurnOn == 1 && device.LineIndex%2 == 0 {
+				TurnOn = true
+			}
+			return []interface{}{struct {
+				Type  string `json:"type"`
+				State struct {
+					Instance string      `json:"instance"`
+					Value    interface{} `json:"value"`
+				} `json:"state"`
+			}{
+				Type: "devices.capabilities.on_off",
+				State: struct {
+					Instance string      "json:\"instance\""
+					Value    interface{} "json:\"value\""
+				}{
+					Instance: "on",
+					Value:    TurnOn,
+				},
+			}}
+		}
+	case "devices.types.other":
+		{
+			TurnOn := false
+			if device.TurnOn == 1 {
+				TurnOn = true
+			}
+			return []interface{}{struct {
+				Type  string `json:"type"`
+				State struct {
+					Instance string      `json:"instance"`
+					Value    interface{} `json:"value"`
+				} `json:"state"`
+			}{
+				Type: "devices.capabilities.on_off",
+				State: struct {
+					Instance string      "json:\"instance\""
+					Value    interface{} "json:\"value\""
+				}{
+					Instance: "on",
+					Value:    TurnOn,
+				},
+			}}
+		}
 	}
 
 	return make([]interface{}, 0)

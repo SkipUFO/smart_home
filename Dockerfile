@@ -23,11 +23,10 @@ WORKDIR /go/src/bsh-backend
 COPY ./src .
 COPY go.mod .
 
-#RUN GOCHACHE=OFF
+RUN GOCACHE=OFF
 RUN go env -w GOPRIVATE=gitlab.com/ms-ural
 RUN git config --global url."https://${USERNAME}:${TOKEN}@gitlab.com".insteadOf "https://gitlab.com"
 RUN go mod tidy -v
-#RUN go install -v ./...
 RUN CGO_ENABLED=1 go install -v ./...
 
 # This results in a single layer image

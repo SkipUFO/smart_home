@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"net/http"
@@ -160,6 +161,7 @@ func handlers() http.Handler {
 	r := mux.NewRouter()
 
 	// Yandex API
+	r.HandleFunc("/api/v1.0", head).Methods(http.MethodHead)
 	r.HandleFunc("/auth/authorize", authorize)
 	r.HandleFunc("/auth/token", token)
 	r.HandleFunc("/api/v1.0/user/unlink", unlink).Methods(http.MethodPost)
@@ -183,11 +185,32 @@ func handlers() http.Handler {
 
 	return r
 }
+func head(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	msu.Info(ctx, zap.String("method", "head"))
+	w.WriteHeader(http.StatusOK)
+}
 
 func authorize(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	requestID := generateUUID()
+
+	mutex := sync.Mutex{}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
 
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO auth_requests (id, request, dt) VALUES ($1, $2, $3)`,
@@ -196,6 +219,16 @@ func authorize(w http.ResponseWriter, r *http.Request) {
 			err,
 			zap.Any("uri", r.RequestURI),
 			zap.Any("query", r.URL.Query()))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -361,8 +394,25 @@ func login(w http.ResponseWriter, r *http.Request) {
 	//
 
 	code := generateUUID()
+
+	mutex := sync.Mutex{}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")),
+			zap.Any("body", string(body)))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
 	// set code to users
-	if _, err = db.ExecContext(ctx, `UPDATE users SET yandex_code = $1 WHERE name = $2`, code, username); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE users SET yandex_code = $1 WHERE name = $2`, code, username); err != nil {
 		msu.Error(ctx,
 			err,
 			zap.Any("uri", r.RequestURI),
@@ -375,7 +425,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	//
 
 	// remove request from auth_requests
-	if _, err = db.ExecContext(ctx, `DELETE FROM auth_requests WHERE id = $1`, request); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM auth_requests WHERE id = $1`, request); err != nil {
 		msu.Error(ctx,
 			err,
 			zap.Any("uri", r.RequestURI),
@@ -386,6 +436,17 @@ func login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	//
+
+	if err = tx.Commit(); err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")),
+			zap.Any("body", string(body)))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
 	w.Header().Set("Location", "https://social.yandex.net/broker/redirect?"+urlRawQuery+"&code="+code)
 	w.WriteHeader(http.StatusMovedPermanently)
@@ -414,23 +475,61 @@ func token(w http.ResponseWriter, r *http.Request) {
 		zap.Any("AuthHeader", r.Header.Get("Authorization")),
 		zap.Any("body", string(body)))
 
+	// grant_type=refresh_token
 	code := ""
+	grant_type := ""
+	refresh_token := ""
 	// credentials from body
+	msu.Info(ctx, zap.Any("query", strings.Split(string(body), "&")))
 	for _, val := range strings.Split(string(body), "&") {
 		if strings.HasPrefix(val, "code") {
 			temp := strings.Split(val, "=")
 			if len(temp) == 2 {
 				code = temp[len(temp)-1]
 			}
-			continue
+		} else if strings.HasPrefix(val, "grant_type") {
+			temp := strings.Split(val, "=")
+			if len(temp) == 2 {
+				grant_type = temp[len(temp)-1]
+			}
+		} else if strings.HasPrefix(val, "refresh_token") {
+			temp := strings.Split(val, "=")
+			if len(temp) == 2 {
+				refresh_token = temp[len(temp)-1]
+			}
 		}
 	}
 	//
 
+	access_token := generateUUID()
+
 	var commandTag sql.Result
-	token := generateUUID()
-	// select and update token from code
-	if commandTag, err = db.ExecContext(ctx, `UPDATE users SET yandex_token = $1 WHERE yandex_code = $2`, token, code); err != nil {
+
+	mutex := sync.Mutex{}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")),
+			zap.Any("body", string(body)))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if grant_type == "authorization_code" { // Выдаем новый токен
+		commandTag, err = tx.ExecContext(ctx, `UPDATE users SET yandex_token = $1 WHERE yandex_code = $2`, access_token, code)
+	} else if grant_type == "refresh_token" { // Проверяем токен, выдаем новый
+		msu.Info(ctx, zap.Any("access_token", access_token), zap.Any("refresh_token", refresh_token))
+		commandTag, err = tx.ExecContext(ctx, `UPDATE users SET yandex_token = $1 WHERE yandex_token = $2`, access_token, refresh_token)
+	}
+
+	if err != nil {
 		msu.Error(ctx,
 			err,
 			zap.Any("uri", r.RequestURI),
@@ -453,17 +552,33 @@ func token(w http.ResponseWriter, r *http.Request) {
 	}
 	//
 
+	if err = tx.Commit(); err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json;charset=UTF-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	w.WriteHeader(http.StatusOK)
 
+	msu.Info(ctx, zap.Any("response", string(`{
+		"access_token":"`+access_token+`",
+		"token_type":"Bearer",
+		"expires_in": 62208000,
+		"refresh_token":"`+access_token+`"
+	}`)))
 	fmt.Fprint(w,
 		string(`{
-			"access_token":"`+token+`",
+			"access_token":"`+access_token+`",
 			"token_type":"Bearer",
-			"expires_in":3600,
-			"refresh_token":"`+token+`"
+			"expires_in": 62208000,
+			"refresh_token":"`+access_token+`"
 		}`),
 	)
 }
@@ -490,9 +605,25 @@ func unlink(w http.ResponseWriter, r *http.Request) {
 		zap.Any("query", r.URL.Query()),
 		zap.Any("AuthHeader", r.Header.Get("Authorization")))
 
+	mutex := sync.Mutex{}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
 	var commandTag sql.Result
 	// select and update token from code
-	if commandTag, err = db.ExecContext(ctx, `UPDATE users SET yandex_token = null WHERE yandex_code = $1`, token); err != nil {
+	if commandTag, err = tx.ExecContext(ctx, `UPDATE users SET yandex_token = null WHERE yandex_token = $1`, token); err != nil {
 		msu.Error(ctx,
 			err,
 			zap.Any("uri", r.RequestURI),
@@ -514,6 +645,16 @@ func unlink(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	//
+
+	if err = tx.Commit(); err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json;charset=UTF-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -551,6 +692,7 @@ func devices(w http.ResponseWriter, r *http.Request) {
 	result, err := getUserDevices(ctx, r.Header.Get("X-Request-Id"), token)
 	if err != nil {
 		if err.Error() == "account_linking_error" {
+			msu.Error(ctx, errors.New("account_linking_error"))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -610,6 +752,7 @@ func action(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if err.Error() == "account_linking_error" {
+			msu.Error(ctx, errors.New("account_linking_error"))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -667,6 +810,7 @@ func query(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if err.Error() == "account_linking_error" {
+			msu.Error(ctx, errors.New("account_linking_error"))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}

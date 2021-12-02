@@ -39,21 +39,22 @@ type deviceYandex struct {
 }
 
 type deviceSmartHome struct {
-	ID             string `json:"guid"`
+	ID             int    `json:"id"`
+	Guid           string `json:"guid"`
 	Name           string `json:"name"`
-	RoomID         int    `json:"id_rooms"`
-	RoomName       string `json:"rooms_name"`
-	DeviceTypeID   int    `json:"id_devices"`
-	DeviceTypeName string `json:"device_types"`
-	FloorID        int    `json:"id_floor"`
-	FloorName      string `json:"floor_name"`
+	RoomID         int    `json:"idRooms"`
+	RoomName       string `json:"roomsName"`
+	DeviceTypeID   int    `json:"idDevices"`
+	DeviceTypeName string `json:"deviceTypes"`
+	FloorID        int    `json:"idFloor"`
+	FloorName      string `json:"floorName"`
 	Line           int    `json:"line"`
-	LineID         int    `json:"id_line"`
-	LineIndex      int    `json:"index_line"`
+	LineID         int    `json:"idLine"`
+	LineIndex      int    `json:"indexLine"`
 	Active         int    `json:"active"`
 	Dimming        int    `json:"dimming"`
-	TurnOn         int    `json:"turn_on"`
-	DimmingValue   int    `json:"dimming_value"`
+	TurnOn         int    `json:"idStatus"`
+	DimmingValue   int    `json:"dimmingValue"`
 	host           string
 	username       string
 	password       string
@@ -80,6 +81,7 @@ func getUserDevices(c context.Context, requestID string, token string) (string, 
 	if err != nil {
 		return "", err
 	}
+	defer rows.Close()
 
 	count := 0
 	for rows.Next() {
@@ -92,7 +94,7 @@ func getUserDevices(c context.Context, requestID string, token string) (string, 
 		temp, err := getUserDevicesFromSmartHome(ctx, name.String, password.String, uri.String)
 		if err != nil {
 			msu.Error(ctx, err)
-			return "", err
+			// return "", err
 		}
 
 		devices = append(devices, temp...)
@@ -136,7 +138,7 @@ func toYandexDevices(c context.Context, devices []deviceSmartHome) ([]deviceYand
 	for _, val := range devices {
 		typeYandexID, err := typeYandex(val.DeviceTypeID)
 		if typeYandexID == "devices.types.openable" || typeYandexID == "devices.types.openable.curtain" {
-			if val.LineIndex == 1 {
+			if val.LineIndex == 1 || val.LineIndex == 3 || val.LineIndex == 5 || val.LineIndex == 7 {
 				continue
 			}
 		}
@@ -146,7 +148,7 @@ func toYandexDevices(c context.Context, devices []deviceSmartHome) ([]deviceYand
 
 		devicesYandex = append(devicesYandex,
 			deviceYandex{
-				ID:          val.ID,
+				ID:          val.Guid,
 				Name:        val.Name,
 				Description: "",
 				Room:        val.RoomName,
@@ -484,18 +486,18 @@ func typeYandex(smartHomeTypeID int) (string, error) {
 	switch smartHomeTypeID {
 	case 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18:
 		return "devices.types.light", nil
-	/*case 19, 25, 36, 42, 43, 44, 46, 48, 49, 50, 51, 52, 53, 54, 55, 56, 58, 59:
+	case 19, 30, 47, 54, 55, 56, 58, 60, 61, 62, 63, 64, 65, 66, 67, 68, 70, 71:
 		return "devices.types.socket", nil
-	case 28:
-		return "devices.types.thermostat.ac", nil*/
-	case 20, 21, 22, 23, 34, 35:
+	case 33:
+		return "devices.types.thermostat.ac", nil
+	case 20, 21, 22, 23, 24, 25, 26, 27, 43, 44, 45, 46:
 		return "devices.types.openable.curtain", nil
-		/*case 24, 29, 30, 31, 32, 41:
-			return "devices.types.openable", nil
-		default:
-			return "devices.types.other", nil
-		*/
+	case 28, 29, 34, 35, 36, 37, 38, 39, 40, 41, 52, 53:
+		return "devices.types.openable", nil
+	default:
+		return "devices.types.other", nil
+
 	}
 
-	return "", errors.New("type not found")
+	//return "", errors.New("type not found")
 }

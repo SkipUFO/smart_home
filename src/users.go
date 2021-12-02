@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
@@ -76,10 +77,38 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.ExecContext(ctx,
+	mutex := sync.Mutex{}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")),
+			zap.Any("body", string(body)))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO users (name, password) VALUES ($1, $2)`,
 		request.UserLogin,
 		fmt.Sprintf("%x", md5.Sum([]byte(request.UserPassword)))); err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")),
+			zap.Any("body", string(body)))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
 		msu.Error(ctx,
 			err,
 			zap.Any("uri", r.RequestURI),
@@ -147,10 +176,36 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 
 	token := generateUUID()
 
-	if _, err = db.ExecContext(ctx,
+	mutex := sync.Mutex{}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.ExecContext(ctx,
 		`UPDATE users SET app_token = $1 WHERE id = $2`,
 		token,
 		id); err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
 		msu.Error(ctx,
 			err,
 			zap.Any("uri", r.RequestURI),

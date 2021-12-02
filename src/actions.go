@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -60,23 +61,22 @@ type deviceActionResponseYandex struct {
 }
 
 type deviceActionSmartHome struct {
-	SetCommand    string `json:"setcommand"`
 	Login         string `json:"login"`
 	Password      string `json:"password"`
-	ID            string `json:"id"`
-	FloorID       int    `json:"id_floor"`
-	RoomID        int    `json:"id_room"`
-	LineID        int    `json:"id_line"`
+	ID            int    `json:"id"`
+	FloorID       int    `json:"idFloor"`
+	RoomID        int    `json:"idRoom"`
+	LineID        int    `json:"idLine"`
 	Line          int    `json:"line"`
-	LineIndex     int    `json:"index_line"`
-	TurnOn        int    `json:"turn_on"`
-	ChangeDimming int    `json:"change_dimming"`
+	LineIndex     int    `json:"indexLine"`
+	TurnOn        int    `json:"idStatus"`
+	ChangeDimming int    `json:"changeDimming"`
 	Dimming       int    `json:"dimming"`
-	DimmingValue  int    `json:"dimming_value"`
-	ColorDraw     string `json:"color_draw"`
-	ColorDrawOff  string `json:"color_draw_off"`
-	SetPassword   string `json:"set_password"`
-	ColorText     string `json:"color_text"`
+	DimmingValue  int    `json:"dimmingValue"`
+	ColorDraw     string `json:"colorDraw"`
+	ColorDrawOff  string `json:"colorDrawOff"`
+	SetPassword   string `json:"setPassword"`
+	ColorText     string `json:"colorText"`
 }
 
 func deviceAction(c context.Context, requestID string, token string, body []byte) (string, error) {
@@ -97,6 +97,7 @@ func deviceAction(c context.Context, requestID string, token string, body []byte
 	if err != nil {
 		return "", err
 	}
+	defer rows.Close()
 	count := 0
 	for rows.Next() {
 		var name, password, uri pgtype.Varchar
@@ -108,7 +109,7 @@ func deviceAction(c context.Context, requestID string, token string, body []byte
 		temp, err := getUserDevicesFromSmartHome(ctx, name.String, password.String, uri.String)
 		if err != nil {
 			msu.Error(ctx, err)
-			return "", err
+			// return "", err
 		}
 
 		devices = append(devices, temp...)
@@ -127,7 +128,7 @@ func deviceAction(c context.Context, requestID string, token string, body []byte
 	for _, val := range request.Payload.Devices {
 		ds := make([]deviceSmartHome, 0)
 		for _, device := range devices {
-			if val.ID == device.ID {
+			if val.ID == device.Guid {
 				ds = append(ds, device)
 			}
 		}
@@ -219,28 +220,34 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 	if len(devices) == 1 {
 		device := devices[0]
 		TurnOn = devices[0].TurnOn
-		if action.Capabilities[0].Type == "devices.capabilities.on_off" {
-			if action.Capabilities[0].State.Instance == "on" {
-				if action.Capabilities[0].State.Value.(bool) {
-					TurnOn = 1
-				} else {
-					TurnOn = 0
-				}
-			}
-		}
 		DimmingValue = float64(devices[0].DimmingValue)
-		if action.Capabilities[0].Type == "devices.capabilities.range" {
-			if action.Capabilities[0].State.Instance == "brightness" {
-				if action.Capabilities[0].State.Relative {
-					DimmingValue += action.Capabilities[0].State.Value.(float64)
-				} else {
-					DimmingValue = action.Capabilities[0].State.Value.(float64)
+		ChangeDimming := 0
+
+		for _, cap := range action.Capabilities {
+			if cap.Type == "devices.capabilities.on_off" {
+				if cap.State.Instance == "on" {
+					if cap.State.Value.(bool) {
+						TurnOn = 1
+					} else {
+						TurnOn = 0
+					}
+				}
+			} else if cap.Type == "devices.capabilities.range" {
+				if cap.State.Instance == "brightness" {
+					if cap.State.Relative {
+						DimmingValue += cap.State.Value.(float64)
+						ChangeDimming = 1
+					} else {
+						DimmingValue = cap.State.Value.(float64)
+						if device.DimmingValue != int(cap.State.Value.(float64)) {
+							ChangeDimming = 1
+						}
+					}
 				}
 			}
 		}
 
 		actions = append(actions, deviceActionSmartHome{
-			SetCommand:    "true",
 			Login:         username,
 			Password:      password,
 			ID:            device.ID,
@@ -250,7 +257,7 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 			Line:          device.Line,
 			LineIndex:     device.LineIndex,
 			TurnOn:        TurnOn,
-			ChangeDimming: 0,
+			ChangeDimming: ChangeDimming,
 			Dimming:       device.Dimming,
 			DimmingValue:  int(DimmingValue),
 			ColorDraw:     "0xff010000",
@@ -264,7 +271,6 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 			if action.Capabilities[0].State.Instance == "on" {
 				if action.Capabilities[0].State.Value.(bool) {
 					actions = append(actions, deviceActionSmartHome{
-						SetCommand:    "true",
 						Login:         username,
 						Password:      password,
 						ID:            devices[0].ID,
@@ -284,7 +290,6 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 					})
 
 					actions = append(actions, deviceActionSmartHome{
-						SetCommand:    "true",
 						Login:         username,
 						Password:      password,
 						ID:            devices[1].ID,
@@ -304,7 +309,6 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 					})
 				} else {
 					actions = append(actions, deviceActionSmartHome{
-						SetCommand:    "true",
 						Login:         username,
 						Password:      password,
 						ID:            devices[0].ID,
@@ -324,7 +328,6 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 					})
 
 					actions = append(actions, deviceActionSmartHome{
-						SetCommand:    "true",
 						Login:         username,
 						Password:      password,
 						ID:            devices[1].ID,
@@ -355,10 +358,12 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 			return err
 		}
 
+		fmt.Println(string(b))
+
 		if debug {
 			msu.Info(ctx,
 				zap.String("request", "controller"),
-				zap.Any("uri", host+"?"+encode(encryptKey, string(b))),
+				zap.Any("uri", host+"?setcommand="+encode(encryptKey, string(b))),
 				zap.Any("req.object", act))
 		}
 
@@ -366,7 +371,7 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 			zap.String("request", "controller"),
 			zap.Any("uri", host+"?"+encode(encryptKey, string(b))))
 
-		req, err := http.NewRequest("GET", host+"?"+encode(encryptKey, string(b)), nil)
+		req, err := http.NewRequest("GET", host+"?setcommand="+encode(encryptKey, string(b)), nil)
 		if err != nil {
 			return err
 		}
@@ -387,14 +392,14 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 		if debug {
 			msu.Info(ctx,
 				zap.String("response", "controller"),
-				zap.Any("uri", host+"?"+encode(encryptKey, string(b))),
+				zap.Any("uri", host+"?setcommand="+encode(encryptKey, string(b))),
 				zap.Any("body", string(body)),
 				zap.Any("resp.object", decode(encryptKey, strings.TrimSpace(string(body)))))
 		}
 
 		msu.Info(ctx,
 			zap.String("response", "controller"),
-			zap.Any("uri", host+"?"+encode(encryptKey, string(b))),
+			zap.Any("uri", host+"?setcommand="+encode(encryptKey, string(b))),
 			zap.Any("body", string(body)))
 	}
 

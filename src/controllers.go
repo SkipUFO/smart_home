@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
@@ -252,9 +253,36 @@ func createController(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err = db.ExecContext(ctx,
+	mutex := sync.Mutex{}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")),
+			zap.Any("body", string(body)))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.ExecContext(ctx,
 		`INSERT INTO controllers (user_id, name, password, uri) VALUES ($1, $2, $3, $4)`,
 		user_id, cntl.Name, cntl.Password, cntl.URI); err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
 		msu.Error(ctx,
 			err,
 			zap.Any("uri", r.RequestURI),
@@ -324,9 +352,36 @@ func updateController(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err = db.ExecContext(ctx,
+	mutex := sync.Mutex{}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")),
+			zap.Any("body", string(body)))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.ExecContext(ctx,
 		`UPDATE controllers SET name = $1, password = $2, uri = $3 WHERE id = $4`,
 		cntl.Name, cntl.Password, cntl.URI, id); err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
 		msu.Error(ctx,
 			err,
 			zap.Any("uri", r.RequestURI),
@@ -372,8 +427,33 @@ func deleteController(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	mutex := sync.Mutex{}
 
-	if _, err = db.ExecContext(ctx, `DELETE FROM controllers WHERE id = $1`, id); err != nil {
+	mutex.Lock()
+	defer mutex.Unlock()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.ExecContext(ctx, `DELETE FROM controllers WHERE id = $1`, id); err != nil {
+		msu.Error(ctx,
+			err,
+			zap.Any("uri", r.RequestURI),
+			zap.Any("query", r.URL.Query()),
+			zap.Any("AuthHeader", r.Header.Get("Authorization")))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
 		msu.Error(ctx,
 			err,
 			zap.Any("uri", r.RequestURI),

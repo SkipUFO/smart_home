@@ -210,9 +210,7 @@ func deviceAction(c context.Context, requestID string, token string, body []byte
 	return string(result), nil
 }
 
-func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string, username string, password string, action deviceActionRequestYandex) error {
-	ctx := c
-
+func transformActions(devices []deviceSmartHome, action deviceActionRequestYandex) ([]deviceActionSmartHome, error) {
 	var TurnOn int
 	var DimmingValue float64
 	var actions []deviceActionSmartHome
@@ -243,13 +241,14 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 							ChangeDimming = 1
 						}
 					}
+
 				}
 			}
 		}
 
 		actions = append(actions, deviceActionSmartHome{
-			Login:         username,
-			Password:      password,
+			Login:         "",
+			Password:      "",
 			ID:            device.ID,
 			FloorID:       device.FloorID,
 			RoomID:        device.RoomID,
@@ -271,8 +270,8 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 			if action.Capabilities[0].State.Instance == "on" {
 				if action.Capabilities[0].State.Value.(bool) {
 					actions = append(actions, deviceActionSmartHome{
-						Login:         username,
-						Password:      password,
+						Login:         "",
+						Password:      "",
 						ID:            devices[0].ID,
 						FloorID:       devices[0].FloorID,
 						RoomID:        devices[0].RoomID,
@@ -290,8 +289,8 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 					})
 
 					actions = append(actions, deviceActionSmartHome{
-						Login:         username,
-						Password:      password,
+						Login:         "",
+						Password:      "",
 						ID:            devices[1].ID,
 						FloorID:       devices[1].FloorID,
 						RoomID:        devices[1].RoomID,
@@ -309,8 +308,8 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 					})
 				} else {
 					actions = append(actions, deviceActionSmartHome{
-						Login:         username,
-						Password:      password,
+						Login:         "",
+						Password:      "",
 						ID:            devices[0].ID,
 						FloorID:       devices[0].FloorID,
 						RoomID:        devices[0].RoomID,
@@ -328,8 +327,8 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 					})
 
 					actions = append(actions, deviceActionSmartHome{
-						Login:         username,
-						Password:      password,
+						Login:         "",
+						Password:      "",
 						ID:            devices[1].ID,
 						FloorID:       devices[1].FloorID,
 						RoomID:        devices[1].RoomID,
@@ -350,8 +349,21 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 		}
 	}
 
-	for _, act := range actions {
+	return actions, nil
+}
 
+func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string, username string, password string, action deviceActionRequestYandex) error {
+	ctx := c
+
+	actions, err := transformActions(devices, action)
+	if err != nil {
+		return err
+	}
+
+	for _, act := range actions {
+		act := act
+		act.Login = username
+		act.Password = password
 		var b []byte
 		var err error
 		if b, err = json.Marshal(act); err != nil {

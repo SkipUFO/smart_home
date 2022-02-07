@@ -375,7 +375,7 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 		if debug {
 			msu.Info(ctx,
 				zap.String("request", "controller"),
-				zap.Any("uri", host+"?setcommand="+encode(encryptKey, string(b))),
+				zap.Any("uri", host+"?setcommandalice="+encode(encryptKey, string(b))),
 				zap.Any("req.object", act))
 		}
 
@@ -383,7 +383,7 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 			zap.String("request", "controller"),
 			zap.Any("uri", host+"?"+encode(encryptKey, string(b))))
 
-		req, err := http.NewRequest("GET", host+"?setcommand="+encode(encryptKey, string(b)), nil)
+		req, err := http.NewRequest("GET", host+"?setcommandalice="+encode(encryptKey, string(b)), nil)
 		if err != nil {
 			return err
 		}
@@ -404,14 +404,14 @@ func actionToSmartHome(c context.Context, devices []deviceSmartHome, host string
 		if debug {
 			msu.Info(ctx,
 				zap.String("response", "controller"),
-				zap.Any("uri", host+"?setcommand="+encode(encryptKey, string(b))),
+				zap.Any("uri", host+"?setcommandalice="+encode(encryptKey, string(b))),
 				zap.Any("body", string(body)),
 				zap.Any("resp.object", decode(encryptKey, strings.TrimSpace(string(body)))))
 		}
 
 		msu.Info(ctx,
 			zap.String("response", "controller"),
-			zap.Any("uri", host+"?setcommand="+encode(encryptKey, string(b))),
+			zap.Any("uri", host+"?setcommandalice="+encode(encryptKey, string(b))),
 			zap.Any("body", string(body)))
 	}
 
